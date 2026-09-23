@@ -109,9 +109,9 @@ The softmax change matters because sampling runs it over all 32,000 logits on ev
 matmul. The fp32 build (`kernels/run-fast.c`) shares the attention and softmax code from
 `kernels/neon_common.h` and reaches 15.3 tok/s.
 
-At this point the model is memory bound. Each token reads about 17 MB of weights, at about 0.98 GB/s,
-and a plain streaming read on this board measures about 0.87 GB/s. More arithmetic tricks won't help
-much; fewer bytes per weight would.
+At this point the model is memory bound. The matmuls take about 18 of the 25 ms per token and stream
+about 17 MB of weights in that time, roughly 0.98 GB/s, while a plain streaming read on this board
+measures about 0.87 GB/s. More arithmetic tricks won't help much; fewer bytes per weight would.
 
 ## Install
 
