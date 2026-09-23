@@ -8,7 +8,7 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install lint tools
         run: |
@@ -22,7 +22,7 @@ jobs:
       - run: make lint
       - run: make test LUA=lua5.4
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .work
           key: work-${{ hashFiles('scripts/fetch.sh', 'scripts/build-smol.sh') }}
@@ -30,7 +30,7 @@ jobs:
       - name: Cross-compile kernels and smol for the Kindle
         run: make build ref
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kindle-armv7-binaries
           path: build/
