@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{lua,c,h,cpp}]
+indent_style = space
+indent_size = 4
+
+[{*.sh,scripts/zcc,scripts/zcxx}]
+indent_style = tab
+
+[Makefile]
+indent_style = tab
+
+[*.{yml,yaml,md}]
+indent_style = space
+indent_size = 2

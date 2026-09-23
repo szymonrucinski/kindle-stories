@@ -1,0 +1,8 @@
+# Downloads, toolchains, models, scratch
+/.work/
+# Build outputs
+/build/
+*.gguf
+*.bin
+*.pt
+*.ttf

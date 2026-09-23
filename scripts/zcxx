@@ -1,0 +1,4 @@
+#!/bin/sh
+# zig as a C++ cross-compiler for the Kindle (armv7 hard-float, musl, Cortex-A9).
+ZIG=${ZIG:-$(dirname "$0")/../.work/zig-x86_64-linux-0.14.1/zig}
+exec "$ZIG" c++ -target arm-linux-musleabihf -mcpu=cortex_a9 "$@"

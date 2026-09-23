@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lint tools
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q lua5.4 ninja-build
+          pipx install clang-format==23.1.1
+          curl -fsSL -o /tmp/stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/download/v2.5.2/stylua-linux-x86_64.zip
+          sudo unzip -o /tmp/stylua.zip -d /usr/local/bin
+          sudo curl -fsSL -o /usr/local/bin/luacheck https://github.com/lunarmodules/luacheck/releases/download/v1.2.0/luacheck
+          sudo chmod +x /usr/local/bin/luacheck
+
+      - run: make lint
+      - run: make test LUA=lua5.4
+
+      - uses: actions/cache@v4
+        with:
+          path: .work
+          key: work-${{ hashFiles('scripts/fetch.sh', 'scripts/build-smol.sh') }}
+
+      - name: Cross-compile kernels and smol for the Kindle
+        run: make build ref
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kindle-armv7-binaries
+          path: build/
