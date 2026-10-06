@@ -24,7 +24,7 @@ local _ = require("gettext")
 local Screen = Device.screen
 
 local PLUGIN_DIR = debug.getinfo(1, "S").source:match("^@(.*/)")
-local parse = dofile(PLUGIN_DIR .. "parse.lua").parse
+local parse = dofile(PLUGIN_DIR .. "parse.lua")
 
 local LLM_DIR = "/mnt/us/llm"
 local OUT = "/tmp/kindlestories.out"
@@ -46,7 +46,8 @@ local OPENERS = {
 
 local AUTHOR = "Szymon Rucinski"
 
--- cmd is run from LLM_DIR as: <cmd> -n <steps> -i <prompt>. Chat models print only the answer.
+-- cmd is run from LLM_DIR as: <cmd> -n <steps> -i <prompt>. Chat models print only the answer
+-- and open in the kit's Chat window instead of the desk.
 local MODELS = {
     {
         id = "tinystories",
@@ -77,8 +78,8 @@ local MODELS = {
             "Give me 3 tips to sleep better.",
             "What is edge AI?",
         },
-        ask = { title = "Ask a question", input = "", ok = "Ask" },
-        intro = "Tap New Story for a random question, or Prompt… to ask your own. SmolLM2, a 135-million parameter chat model, answers token by token on this Kindle's 1 GHz Cortex-A9. No cloud.\n\nBuilt by Szymon Rucinski.",
+        ask = { title = "Ask a question" },
+        intro = "Tap Ask... to ask a question, or pick one from the Questions menu. SmolLM2, a 135-million parameter chat model, answers token by token on this Kindle's 1 GHz Cortex-A9. No cloud. Each question is answered on its own.",
     },
 }
 
@@ -90,6 +91,8 @@ local function findModel(id)
     end
     return MODELS[1]
 end
+
+local show -- (model, prompt): opens the desk, or the Chat window for a chat model
 
 -- Layout in pixels for the 600x800 panel (Kindle 4/5/Touch/PW1-class).
 local W = 600
@@ -110,7 +113,7 @@ function MacDesk:init()
     self.face_title = Font:getFace("ChicagoFLF.ttf", 17)
     self.face_story = Font:getFace("ChicagoFLF.ttf", 19)
     self.face_status = Font:getFace("ChicagoFLF.ttf", 14)
-    self.model = findModel(G_reader_settings:readSetting("kindlestories_model"))
+    self.model = self.model or MODELS[1]
     self.status = self:idleStatus()
     local pad = 16
     self.story_box = Geom:new {
@@ -300,7 +303,7 @@ function MacDesk:showStoryMenu()
     for _, o in ipairs(self.model.presets) do
         table.insert(rows, {
             {
-                text = self.model.chat and o or o .. "…",
+                text = o .. "…",
                 callback = function()
                     UIManager:close(self.menu_dialog)
                     self:generate(o)
@@ -325,9 +328,14 @@ function MacDesk:showModelMenu()
                 callback = function()
                     UIManager:close(self.menu_dialog)
                     self:stop()
-                    self.model = m
                     G_reader_settings:saveSetting("kindlestories_model", m.id)
                     G_reader_settings:flush()
+                    if m.chat then
+                        self:quit()
+                        show(m)
+                        return
+                    end
+                    self.model = m
                     self:setStory(_(m.intro)) -- also resets the scroll left by a long answer
                     self.status = self:idleStatus()
                     UIManager:setDirty(self, "ui")
@@ -378,14 +386,30 @@ local function shq(s)
     return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
-function MacDesk:generate(prompt)
-    if self.running then
-        return
+local function pidAlive(pid)
+    return pid and lfs.attributes("/proc/" .. pid) ~= nil
+end
+
+local function readPid()
+    local f = io.open(PID)
+    if not f then
+        return nil
     end
-    local m = self.model
+    local pid = f:read("*n")
+    f:close()
+    return pid
+end
+
+-- One model process at a time (they share OUT and PID): its stop function, while it runs.
+local stopModel = function() end
+
+-- Runs model m on prompt in the background and polls its output every POLL_S:
+-- on_update(text, secs, changed) while it runs, then once on_end(text, tps, secs) (tps nil: it
+-- died first). text only grows (parse.settled). Returns a stop function, or nil and an error.
+local function runModel(m, prompt, on_update, on_end)
+    stopModel()
     if not lfs.attributes(LLM_DIR .. "/" .. m.cmd:match("^%./(%S+)")) then
-        UIManager:show(InfoMessage:new { text = _("Model binary not found in ") .. LLM_DIR })
-        return
+        return nil, _("Model binary not found in ") .. LLM_DIR
     end
     os.remove(OUT)
     os.execute(
@@ -399,80 +423,74 @@ function MacDesk:generate(prompt)
             PID
         )
     )
+    local t0, last_len, poll = time.now(), -1, nil
+    local function stop()
+        UIManager:unschedule(poll)
+        stopModel = function() end
+        local pid = readPid()
+        if pidAlive(pid) then
+            os.execute("kill " .. pid)
+        end
+    end
+    poll = function()
+        local f = io.open(OUT)
+        local out = f and f:read("*a") or ""
+        if f then
+            f:close()
+        end
+        local text, tps = parse.settled(out)
+        local secs = time.to_s(time.since(t0))
+        if tps or (not pidAlive(readPid()) and secs > 3) then
+            stopModel = function() end
+            on_end(text, tps, secs)
+            return
+        end
+        on_update(text, secs, #out ~= last_len)
+        last_len = #out
+        UIManager:scheduleIn(POLL_S, poll)
+    end
+    UIManager:scheduleIn(POLL_S, poll)
+    stopModel = stop
+    return stop
+end
+
+function MacDesk:generate(prompt)
+    if self.running then
+        return
+    end
+    local m = self.model
+    local label = m.label
+    local stop, err = runModel(m, prompt, function(story, secs, changed)
+        if changed then
+            self:setStory(story .. " █")
+        end
+        self.status = string.format("%s · %d chars · %.0fs", label, #story, secs)
+        self:refreshStory("fast")
+    end, function(story, tps, secs)
+        self.running = false
+        if tps then
+            self:setStory(story)
+            self.status = string.format("%s · %.1f tok/s · %.0fs · done", label, tps, secs)
+        else
+            self:setStory(story ~= "" and story or _("(the model stopped before writing anything)"))
+            self.status = label .. " · stopped"
+        end
+        UIManager:setDirty(self, "ui")
+    end)
+    if not stop then
+        UIManager:show(InfoMessage:new { text = err })
+        return
+    end
     self.running = true
-    self.t0 = time.now()
-    self.last_len = -1
-    -- llama2.c echoes the prompt; chat models print only the answer, so show the question ourselves.
-    self.prefix = m.chat and "Q: " .. prompt .. "\n\n" or ""
-    self:setStory(self.prefix .. (m.chat and "" or prompt) .. " █")
-    self.status = m.label .. " · starting…"
+    -- llama2.c echoes the prompt, so the story starts with it.
+    self:setStory(prompt .. " █")
+    self.status = label .. " · starting…"
     UIManager:setDirty(self, "ui")
-    self.poll_fn = self.poll_fn or function()
-        self:poll()
-    end
-    UIManager:scheduleIn(POLL_S, self.poll_fn)
-end
-
-local function pidAlive(pid)
-    return pid and lfs.attributes("/proc/" .. pid) ~= nil
-end
-
-function MacDesk:readPid()
-    local f = io.open(PID)
-    if not f then
-        return nil
-    end
-    local pid = f:read("*n")
-    f:close()
-    return pid
-end
-
-function MacDesk:poll()
-    if not self.running then
-        return
-    end
-    local f = io.open(OUT)
-    local out = f and f:read("*a") or ""
-    if f then
-        f:close()
-    end
-    local story, tps = parse(out)
-    if self.model.chat then
-        story = story:gsub("%*%*", "")
-    end -- chat models like **markdown**
-    story = self.prefix .. story
-    local label = self.model.label
-    local secs = time.to_s(time.since(self.t0))
-    if tps then
-        self.running = false
-        self:setStory(story)
-        self.status = string.format("%s · %.1f tok/s · %.0fs · done", label, tps, secs)
-        UIManager:setDirty(self, "ui")
-        return
-    end
-    if not pidAlive(self:readPid()) and secs > 3 then
-        self.running = false
-        self:setStory(story ~= self.prefix and story or _("(the model stopped before writing anything)"))
-        self.status = label .. " · stopped"
-        UIManager:setDirty(self, "ui")
-        return
-    end
-    if #out ~= self.last_len then
-        self.last_len = #out
-        self:setStory(story .. " █")
-    end
-    self.status = string.format("%s · %d chars · %.0fs", label, #story - #self.prefix, secs)
-    self:refreshStory("fast")
-    UIManager:scheduleIn(POLL_S, self.poll_fn)
 end
 
 function MacDesk:stop()
-    if self.poll_fn then
-        UIManager:unschedule(self.poll_fn)
-    end
-    local pid = self:readPid()
-    if self.running and pidAlive(pid) then
-        os.execute("kill " .. pid)
+    if self.running then
+        stopModel()
     end
     self.running = false
 end
@@ -494,6 +512,163 @@ function MacDesk:onShow()
     UIManager:setDirty(self, "full")
 end
 
+local macui -- the kit, loaded with the first Chat window: the desk does not use it
+
+local function loadKit()
+    if not macui then
+        -- Chat requires "markdown": this folder's copy, unless another plugin already provides one.
+        package.preload.markdown = package.preload.markdown
+            or function()
+                return dofile(PLUGIN_DIR .. "markdown.lua")
+            end
+        macui = dofile(PLUGIN_DIR .. "macui.lua")
+        if not macui.FONT.fallback then
+            -- kindle-ui installs a Polish Chicago; deploy.sh installs the plain one.
+            macui.FONT = setmetatable({ fallback = "ChicagoFLF.ttf" }, { __index = macui.FONT })
+        end
+    end
+    return macui
+end
+
+-- A chat model in the kit's Chat window (the same one as kindle-ui's Mac Assistant). Each
+-- question is answered on its own (the model has a 512-token context); the window keeps the turns.
+local function openChat(m, prompt)
+    local kit = loadKit()
+    local idle = m.label .. " · " .. m.params .. " params · on this Kindle"
+    local status, running = idle, false
+    local chat = kit.Chat:new {
+        empty = m.intro,
+        status = function()
+            return status
+        end,
+    }
+    local app, win
+    local function setStatus(s)
+        status = s
+        chat:changed() -- repaints the status strip with the conversation
+    end
+    local function send(text, ctx)
+        local shown = ""
+        local stop, err = runModel(m, text, function(out, secs, changed)
+            if changed and #out > #shown then
+                ctx.append(out:sub(#shown + 1))
+                shown = out
+            end
+            status = string.format("%s · %d chars · %.0fs", m.label, #shown, secs)
+        end, function(out, tps, secs)
+            running = false
+            if #out > #shown then
+                ctx.append(out:sub(#shown + 1))
+                shown = out
+            end
+            if tps then
+                setStatus(string.format("%s · %.1f tok/s · %.0fs · done", m.label, tps, secs))
+                ctx.done()
+            else
+                setStatus(m.label .. " · stopped")
+                ctx.done(
+                    shown:match("%S") and "the model stopped early"
+                        or "the model stopped before writing anything"
+                )
+            end
+        end)
+        if not stop then
+            error(err, 0) -- openChat shows it as an error note
+        end
+        running = true
+        setStatus(m.label .. " · starting…")
+        return function()
+            running = false
+            stop()
+            setStatus(idle)
+        end
+    end
+    local function switchTo(other)
+        G_reader_settings:saveSetting("kindlestories_model", other.id)
+        G_reader_settings:flush()
+        app:quit()
+        show(other)
+    end
+    app = kit.App:new {
+        dialog = true,
+        onQuit = function()
+            stopModel()
+        end,
+        menus = {
+            {
+                title = "File",
+                items = function()
+                    return {
+                        {
+                            text = "Quit",
+                            callback = function()
+                                app:quit()
+                            end,
+                        },
+                    }
+                end,
+            },
+            {
+                title = "Questions",
+                items = function()
+                    local items = {}
+                    for _k, q in ipairs(m.presets) do
+                        items[#items + 1] = {
+                            text = q,
+                            enabled = not running,
+                            callback = function()
+                                win.ask(q)
+                            end,
+                        }
+                    end
+                    return items
+                end,
+            },
+            {
+                title = "Special",
+                items = function()
+                    local items = {}
+                    for _k, other in ipairs(MODELS) do
+                        items[#items + 1] = {
+                            text = other.name,
+                            checked = other == m,
+                            callback = function()
+                                if other ~= m then
+                                    switchTo(other)
+                                end
+                            end,
+                        }
+                    end
+                    return items
+                end,
+            },
+        },
+    }
+    UIManager:show(app)
+    win = app:openChat {
+        title = m.title,
+        chat = chat,
+        send = send,
+        ask = { title = m.ask.title, hint = m.presets[1] },
+    }
+    if prompt and prompt ~= "" then
+        win.ask(prompt)
+    end
+    return app, win
+end
+
+function show(m, prompt)
+    if m.chat then
+        return openChat(m, prompt)
+    end
+    local desk = MacDesk:new { model = m }
+    UIManager:show(desk)
+    if prompt and prompt ~= "" then
+        desk:generate(prompt)
+    end
+    return desk
+end
+
 local KindleStories = WidgetContainer:extend {
     name = "kindlestories",
     is_doc_only = false,
@@ -511,11 +686,7 @@ function KindleStories:init()
         f:close()
         os.remove(AUTOSTART)
         UIManager:nextTick(function()
-            local desk = MacDesk:new {}
-            UIManager:show(desk)
-            if prompt ~= "" then
-                desk:generate(prompt)
-            end
+            show(findModel(G_reader_settings:readSetting("kindlestories_model")), prompt)
         end)
     end
 end
@@ -531,7 +702,7 @@ function KindleStories:addToMainMenu(menu_items)
 end
 
 function KindleStories:onShowKindleStories()
-    UIManager:show(MacDesk:new {})
+    show(findModel(G_reader_settings:readSetting("kindlestories_model")))
     return true
 end
 

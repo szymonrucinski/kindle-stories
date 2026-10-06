@@ -34,7 +34,7 @@ done
 echo "plugin -> $KO/plugins/kindlestories.koplugin"
 # The plugin used to be called tinystories.koplugin; two copies would both load.
 kssh "rm -rf $KO/plugins/tinystories.koplugin $KO/plugins/kindlestories.koplugin && mkdir -p $KO/plugins/kindlestories.koplugin"
-tar cf - -C plugin/kindlestories.koplugin _meta.lua main.lua parse.lua |
+tar cf - -C plugin/kindlestories.koplugin _meta.lua main.lua parse.lua macui.lua markdown.lua |
 	kssh "tar xf - -C $KO/plugins/kindlestories.koplugin"
 
 [ -s .work/fonts/ChicagoFLF.ttf ] || scripts/fetch.sh font

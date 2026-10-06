@@ -142,11 +142,16 @@ If you had an older build called `tinystories.koplugin`, delete it; `scripts/dep
 
 In KOReader open the Tools menu (the wrench icon), then More tools, then **Kindle Stories**.
 
-- **New Story** starts a story from a random opening line, or asks SmolLM2 a random question.
-- **Prompt…** lets you type your own opening or question.
-- The **Story** menu lists the preset openings and questions.
+- **New Story** starts a story from a random opening line.
+- **Prompt…** lets you type your own opening.
+- The **Story** menu lists the preset openings.
 - The **Special** menu switches between TinyStories 15M and SmolLM2 135M Chat. The choice is saved.
 - **Quit** or the close box in the title bar stops the model and returns to KOReader.
+
+SmolLM2 opens as a chat window. **Ask...** opens the keyboard for a question, the **Questions** menu
+has the presets, **Stop** kills the model mid-answer and **Copy** puts the last answer on the
+clipboard. The window keeps the conversation, but the model answers each question on its own (its
+context is 512 tokens).
 
 The status strip at the bottom of the window shows progress while generating and the speed when done.
 
@@ -186,7 +191,8 @@ everything, and `make test` runs the Lua unit test. CI runs all of these and cro
 binaries on every push.
 
 ```
-plugin/kindlestories.koplugin/   the KOReader plugin
+plugin/kindlestories.koplugin/   the KOReader plugin; macui.lua and markdown.lua are a vendored copy of
+                                 the System 1 kit (refresh with scripts/sync-kit.sh)
 kernels/                         NEON versions of llama2.c's run.c and runq.c, device-side bench scripts
 smollm/                          llama.cpp wrapper for SmolLM2
 scripts/                         fetch, build, deploy and benchmark scripts
