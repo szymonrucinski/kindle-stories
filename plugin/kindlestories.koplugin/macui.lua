@@ -1,4 +1,4 @@
--- Vendored from kindle-ui b3d20bcdeb23d2c19b5fe707514dddb6503d2aa2:src/lib/macui.lua by scripts/sync-kit.sh; edit it there, not here.
+-- Vendored from kindle-ui baee37244b5f7e612fa4aee52bcb108806f7e207:src/lib/macui.lua by scripts/sync-kit.sh; edit it there, not here.
 --[[--
 macui: Macintosh System 1 (1984) widgets for KOReader plugins.
 
@@ -2962,7 +2962,8 @@ function M.Chat:free() self.doc:free() end
 
 -- A chat window with its own buttons: Ask... (the composer; Stop while an answer runs), Copy (the
 -- last answer), any buttons_extra, Back. The app supplies send() only; this owns the busy state.
--- Returns the window; win.ask(text) asks without the composer (e.g. a first question).
+-- Returns the window; win.ask(text) asks without the composer (e.g. a first question) and is ignored
+-- while an answer runs; win.busy() tells whether one does.
 ---@param spec macui.ChatSpec
 ---@return table window
 function M.App:openChat(spec)
@@ -3005,8 +3006,8 @@ function M.App:openChat(spec)
         chat:add("note", "Stopped.")
     end
     local function ask(text)
-        if not text or not text:match("%S") then
-            return
+        if run or not text or not text:match("%S") then
+            return -- one answer at a time: Stop first
         end
         chat:add("user", text)
         local ctx = { chat = chat, app = self }
@@ -3062,6 +3063,7 @@ function M.App:openChat(spec)
     local win = { title = spec.title, content = chat, buttons = buttons, onClose = function() stop(true) end }
     self:pushWindow(win)
     win.ask = ask -- for apps (and tools/ko) that start a question themselves
+    win.busy = function() return run ~= nil end
     return win
 end
 

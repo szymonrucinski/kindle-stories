@@ -1,4 +1,4 @@
--- Vendored from kindle-ui b3d20bcdeb23d2c19b5fe707514dddb6503d2aa2:src/lib/markdown.lua by scripts/sync-kit.sh; edit it there, not here.
+-- Vendored from kindle-ui baee37244b5f7e612fa4aee52bcb108806f7e207:src/lib/markdown.lua by scripts/sync-kit.sh; edit it there, not here.
 --[[--
 Markdown -> macui.Doc blocks, and inline markdown/LaTeX -> plain text. Pure: no ui/ requires, so it
 runs in the specs (tests/unit/markdown_spec.lua) and in any model module. Moved from alphaxiv_api.lua.

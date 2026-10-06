@@ -535,7 +535,7 @@ end
 local function openChat(m, prompt)
     local kit = loadKit()
     local idle = m.label .. " · " .. m.params .. " params · on this Kindle"
-    local status, running = idle, false
+    local status = idle
     local chat = kit.Chat:new {
         empty = m.intro,
         status = function()
@@ -556,7 +556,6 @@ local function openChat(m, prompt)
             end
             status = string.format("%s · %d chars · %.0fs", m.label, #shown, secs)
         end, function(out, tps, secs)
-            running = false
             if #out > #shown then
                 ctx.append(out:sub(#shown + 1))
                 shown = out
@@ -575,10 +574,8 @@ local function openChat(m, prompt)
         if not stop then
             error(err, 0) -- openChat shows it as an error note
         end
-        running = true
         setStatus(m.label .. " · starting…")
         return function()
-            running = false
             stop()
             setStatus(idle)
         end
@@ -615,7 +612,7 @@ local function openChat(m, prompt)
                     for _k, q in ipairs(m.presets) do
                         items[#items + 1] = {
                             text = q,
-                            enabled = not running,
+                            enabled = not win.busy(),
                             callback = function()
                                 win.ask(q)
                             end,
